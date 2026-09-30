@@ -1,6 +1,9 @@
 package blockchain
 
 import (
+	"errors"
+	"sync"
+
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -12,25 +15,23 @@ const (
 type Blockchain struct {
 	tip []byte
 	db  *bolt.DB
+	mu  sync.Mutex
+}
+
+func (bc *Blockchain) Close() error {
+	return bc.db.Close()
 }
 
 func (bc *Blockchain) AddBlock(data string) error {
-	var lastHash []byte
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	newBlock := NewBlock(data, bc.tip)
 
-	err := bc.db.View(func(tx *bolt.Tx) error {
+	err := bc.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
-		lastHash = append([]byte(nil), b.Get([]byte("l"))...)
-
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	newBlock := NewBlock(data, lastHash)
-
-	err = bc.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(blocksBucket))
+		if b == nil {
+			return errors.New("blocks bucket does not exist")
+		}
 		serializedData, err := newBlock.Serialize()
 		if err != nil {
 			return err
@@ -97,8 +98,4 @@ func NewBlockchain() (*Blockchain, error) {
 
 	bc := Blockchain{tip: tip, db: db}
 	return &bc, nil
-}
-
-func (bc *Blockchain) Blocks() []*Block {
-	return bc.blocks
 }

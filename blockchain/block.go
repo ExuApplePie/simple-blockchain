@@ -28,7 +28,7 @@ func (b *Block) Serialize() ([]byte, error) {
 	return json.Marshal(b)
 }
 
-func (b *Block) DeserializeBlock(d []byte) (*Block, error) {
+func DeserializeBlock(d []byte) (*Block, error) {
 	var block Block
 
 	if err := json.Unmarshal(d, &block); err != nil {

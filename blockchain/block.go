@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -21,4 +22,17 @@ func NewBlock(data string, prevBlockHash []byte) *Block {
 	block.Nonce = nonce
 
 	return block
+}
+
+func (b *Block) Serialize() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *Block) DeserializeBlock(d []byte) (*Block, error) {
+	var block Block
+
+	if err := json.Unmarshal(d, &block); err != nil {
+		return nil, err
+	}
+	return &block, nil
 }

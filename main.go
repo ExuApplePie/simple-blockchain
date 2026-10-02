@@ -7,17 +7,17 @@ import (
 )
 
 func main() {
-	bc, err := blockchain.NewBlockchain()
-	if err != nil {
-		log.Fatalf("Error details: %v", err)
-	}
-	defer func() {
-		if err := bc.Close(); err != nil {
-			log.Printf("failed to close database: %v", err)
-		}
-	}()
+	// bc, err := blockchain.NewBlockchain()
+	// if err != nil {
+	// 	log.Fatalf("Error details: %v", err)
+	// }
+	// defer func() {
+	// 	if err := bc.Close(); err != nil {
+	// 		log.Printf("failed to close database: %v", err)
+	// 	}
+	// }()
 
-	cli := blockchain.NewCLI(bc)
+	cli := blockchain.NewCLI()
 	if err := cli.Run(); err != nil {
 		log.Printf("CLI error: %v", err)
 		return

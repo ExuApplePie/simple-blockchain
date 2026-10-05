@@ -14,24 +14,6 @@ func NewCLI() *CLI {
 	return &CLI{}
 }
 
-func (cli *CLI) addBlock(transaction []*Transaction) error {
-	bc, err := OpenBlockchain()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := bc.Close(); err != nil {
-			fmt.Printf("failed to close database: %v", err)
-		}
-	}()
-
-	if err := bc.MineBlock(transaction); err != nil {
-		return err
-	}
-	fmt.Println("Success!")
-	return nil
-}
-
 func (cli *CLI) printChain() error {
 	bc, err := OpenBlockchain()
 	if err != nil {
@@ -86,7 +68,11 @@ func (cli *CLI) getBalance(address string) error {
 	}()
 
 	balance := 0
-	UTXOs, err := bc.FindUTXO(address)
+	pubKeyHash, err := PubKeyHashFromAddress(address)
+	if err != nil {
+		return nil
+	}
+	UTXOs, err := bc.FindUTXO(pubKeyHash)
 	if err != nil {
 		return err
 	}
@@ -109,14 +95,42 @@ func (cli *CLI) send(from, to string, amount int) error {
 			fmt.Printf("failed to close database: %v", err)
 		}
 	}()
-
-	tx, err := NewUTXOTransaction(from, to, amount, bc)
+	tx, err := NewUTXOTransaction([]byte(from), []byte(to), amount, bc)
 	if err != nil {
 		return err
 	}
 	bc.MineBlock([]*Transaction{tx})
 	fmt.Println("Success!")
 
+	return nil
+}
+
+func createWallet() error {
+	wallets, err := NewWallets()
+	if err != nil {
+		return err
+	}
+
+	address, err := wallets.CreateWallet()
+	if err != nil {
+		return err
+	}
+	if err := wallets.SaveToFile(); err != nil {
+		return err
+	}
+
+	fmt.Printf("Your new address : %s\n", address)
+	return nil
+}
+
+func listAddresses() error {
+	wallets, err := NewWallets()
+	if err != nil {
+		return err
+	}
+	for _, address := range wallets.GetAddresses() {
+		fmt.Printf("%s\n", address)
+	}
 	return nil
 }
 
@@ -129,8 +143,12 @@ func (cli *CLI) validateArgs() error {
 
 func (cli *CLI) printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  addblock -data \"<block data>\"")
-	fmt.Println("  printchain")
+	fmt.Println("  createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS")
+	fmt.Println("  createwallet - Generates a new key-pair and saves it into the wallet file")
+	fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
+	fmt.Println("  listaddresses - Lists all addresses from the wallet file")
+	fmt.Println("  printchain - Print all the blocks of the blockchain")
+	fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
 }
 
 func (cli *CLI) Run() error {
@@ -139,13 +157,11 @@ func (cli *CLI) Run() error {
 		return err
 	}
 
-	addBlockCmd := flag.NewFlagSet("addblock", flag.ContinueOnError)
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ContinueOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ContinueOnError)
 	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ContinueOnError)
 	sendCmd := flag.NewFlagSet("send", flag.ContinueOnError)
 
-	addBlockData := addBlockCmd.String("data", "", "Block data")
 	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
 	getBalanceAddress := getBalanceCmd.String("address", "", "The address to check the balance of")
 	sendAmountSender := sendCmd.String("from", "", "sender address")
@@ -153,10 +169,6 @@ func (cli *CLI) Run() error {
 	sendAmountValue := sendCmd.Int("amount", 0, "amount to send")
 
 	switch os.Args[1] {
-	case "addblock":
-		if err := addBlockCmd.Parse(os.Args[2:]); err != nil {
-			return err
-		}
 	case "printchain":
 		if err := printChainCmd.Parse(os.Args[2:]); err != nil {
 			return err
@@ -173,20 +185,21 @@ func (cli *CLI) Run() error {
 		if err := sendCmd.Parse(os.Args[2:]); err != nil {
 			return err
 		}
+	case "createwallet":
+		if len(os.Args[2:]) != 0 {
+			return errors.New("createwallet takes no arguments")
+		}
+		return createWallet()
+	case "listaddresses":
+		if len(os.Args[2:]) != 0 {
+			return errors.New("listaddresses takes no arguments")
+		}
+		return listAddresses()
 	default:
 		cli.printUsage()
 		return fmt.Errorf("unknown command: %s", os.Args[1])
 	}
 
-	if addBlockCmd.Parsed() {
-		if *addBlockData == "" {
-			addBlockCmd.Usage()
-			return fmt.Errorf("block data cannot be empty")
-		}
-		if err := cli.addBlock(nil); err != nil {
-			return err
-		}
-	}
 	if createBlockchainCmd.Parsed() {
 		if *createBlockchainAddress == "" {
 			createBlockchainCmd.Usage()

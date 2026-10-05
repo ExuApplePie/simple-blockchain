@@ -63,17 +63,24 @@ func dbExists() bool {
 }
 
 func CreateBlockchain(address string) (*Blockchain, error) {
+	if _, err := PubKeyHashFromAddress(address); err != nil {
+		return nil, err
+	}
 	if dbExists() {
 		return nil, fmt.Errorf("blockchain already exists")
 	}
 
+	pubKeyHash, err := PubKeyHashFromAddress(address)
+	if err != nil {
+		return nil, err
+	}
 	var tip []byte
 	db, err := bolt.Open(dbFile, 0o600, nil)
 	if err != nil {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		cbtx, err := NewCoinbaseTX(address, genesisCoinbaseData)
+		cbtx, err := NewCoinbaseTX(pubKeyHash, []byte(genesisCoinbaseData))
 		if err != nil {
 			return err
 		}

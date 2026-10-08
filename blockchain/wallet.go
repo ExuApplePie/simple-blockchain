@@ -62,6 +62,10 @@ func checksum(payload []byte) []byte {
 	return secondSHA[:addressChecksumLen]
 }
 
+func (w Wallet) GetPubKeyHash() []byte {
+	return HashPubKey(w.PublicKey)
+}
+
 // return string as it's meant to be human readable
 func (w Wallet) GetAddress() string {
 	pubKeyHash := HashPubKey(w.PublicKey)

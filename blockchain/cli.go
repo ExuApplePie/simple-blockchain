@@ -33,7 +33,7 @@ func (cli *CLI) printChain() error {
 		}
 
 		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
-		fmt.Printf("Transaction: %s\n", block.Transactions)
+		fmt.Printf("Transaction: %v\n", block.Transactions)
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := NewProofOfWork(block)
 		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
@@ -70,7 +70,7 @@ func (cli *CLI) getBalance(address string) error {
 	balance := 0
 	pubKeyHash, err := PubKeyHashFromAddress(address)
 	if err != nil {
-		return nil
+		return err
 	}
 	UTXOs, err := bc.FindUTXO(pubKeyHash)
 	if err != nil {
@@ -95,11 +95,13 @@ func (cli *CLI) send(from, to string, amount int) error {
 			fmt.Printf("failed to close database: %v", err)
 		}
 	}()
-	tx, err := NewUTXOTransaction([]byte(from), []byte(to), amount, bc)
+	tx, err := NewUTXOTransaction(from, to, amount, bc)
 	if err != nil {
 		return err
 	}
-	bc.MineBlock([]*Transaction{tx})
+	if err := bc.MineBlock([]*Transaction{tx}); err != nil {
+		return err
+	}
 	fmt.Println("Success!")
 
 	return nil
@@ -230,7 +232,14 @@ func (cli *CLI) Run() error {
 			sendCmd.Usage()
 			return fmt.Errorf("sender cannot be empty")
 		}
-		// I guess its fine to let people attempt to send 0 values? it might let people spam system with useless requests though
+		if *sendAmountReceiver == *sendAmountSender {
+			sendCmd.Usage()
+			return fmt.Errorf("sender and receiver cannot be the same person")
+		}
+		if *sendAmountValue <= 0 {
+			sendCmd.Usage()
+			return fmt.Errorf("value to send must be greater than 0")
+		}
 		if err := cli.send(*sendAmountSender, *sendAmountReceiver, *sendAmountValue); err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 )
 
 const (
@@ -43,6 +44,13 @@ func (wl *Wallets) CreateWallet() (string, error) {
 	wl.Wallets[address] = wallet
 
 	return address, nil
+}
+
+func (wl *Wallets) GetWallet(from string) (*Wallet, error) {
+	if slices.Contains(wl.GetAddresses(), from) {
+		return wl.Wallets[from], nil
+	}
+	return nil, errors.New("Wallet not found")
 }
 
 func (wl *Wallets) GetAddresses() []string {

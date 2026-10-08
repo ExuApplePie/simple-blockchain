@@ -1,6 +1,9 @@
 package blockchain
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -25,10 +28,21 @@ func (bc *Blockchain) Close() error {
 	return bc.db.Close()
 }
 
-func (bc *Blockchain) MineBlock(transaction []*Transaction) error {
+func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	newBlock := NewBlock(transaction, bc.tip)
+
+	for _, tx := range transactions {
+		validTransaction, err := bc.VerifyTransaction(tx)
+		if err != nil {
+			return err
+		}
+		if validTransaction != true {
+			return errors.New("Invalid Transaction")
+		}
+	}
+
+	newBlock := NewBlock(transactions, bc.tip)
 
 	err := bc.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
@@ -63,24 +77,25 @@ func dbExists() bool {
 }
 
 func CreateBlockchain(address string) (*Blockchain, error) {
-	if _, err := PubKeyHashFromAddress(address); err != nil {
-		return nil, err
-	}
 	if dbExists() {
 		return nil, fmt.Errorf("blockchain already exists")
 	}
-
-	pubKeyHash, err := PubKeyHashFromAddress(address)
+	wallets, err := NewWallets()
 	if err != nil {
 		return nil, err
 	}
+	_, err = wallets.GetWallet(address)
+	if err != nil {
+		return nil, err
+	}
+
 	var tip []byte
 	db, err := bolt.Open(dbFile, 0o600, nil)
 	if err != nil {
 		return nil, err
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		cbtx, err := NewCoinbaseTX(pubKeyHash, []byte(genesisCoinbaseData))
+		cbtx, err := NewCoinbaseTX(address, genesisCoinbaseData)
 		if err != nil {
 			return err
 		}
@@ -105,6 +120,9 @@ func CreateBlockchain(address string) (*Blockchain, error) {
 		return nil
 	})
 	if err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("initialize blockchain: %w (also failed to close database: %v)", err, closeErr)
+		}
 		return nil, err
 	}
 	return &Blockchain{tip: tip, db: db}, nil
@@ -139,9 +157,62 @@ func OpenBlockchain() (*Blockchain, error) {
 		return nil
 	})
 	if err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("read blockchain tip: %w (also failed to close database: %v)", err, closeErr)
+		}
 		return nil, err
 	}
 
 	return &Blockchain{tip: tip, db: db}, nil
+}
+
+func (bc *Blockchain) FindTransaction(ID []byte) (Transaction, error) {
+	bci := bc.Iterator()
+
+	for {
+		block, err := bci.Next()
+		if err != nil {
+			return Transaction{}, err
+		}
+
+		for _, tx := range block.Transactions {
+			if bytes.Compare(tx.ID, ID) == 0 {
+				return *tx, nil
+			}
+		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+
+	return Transaction{}, errors.New("Transaction not found")
+}
+
+func (bc *Blockchain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey) error {
+	prevTXs := make(map[string]Transaction)
+
+	for _, vin := range tx.Vin {
+		prevTX, err := bc.FindTransaction(vin.Txid)
+		if err != nil {
+			return err
+		}
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+
+	return tx.Sign(privKey, prevTXs)
+}
+
+func (bc *Blockchain) VerifyTransaction(tx *Transaction) (bool, error) {
+	prevTXs := make(map[string]Transaction)
+
+	for _, vin := range tx.Vin {
+		prevTX, err := bc.FindTransaction(vin.Txid)
+		if err != nil {
+			return false, err
+		}
+		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
+	}
+
+	return tx.Verify(prevTXs), nil
 }

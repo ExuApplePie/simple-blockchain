@@ -15,6 +15,7 @@ const (
 	addressVersionLen       = 1
 )
 
+// Wallet contains an ECDSA key pair and its serialized public key.
 type Wallet struct {
 	PrivateKey ecdsa.PrivateKey
 	PublicKey  []byte
@@ -39,6 +40,7 @@ func newKeyPair() (ecdsa.PrivateKey, []byte, error) {
 	return *private, pubKey, nil
 }
 
+// NewWallet generates a new P-256 ECDSA wallet.
 func NewWallet() (*Wallet, error) {
 	private, public, err := newKeyPair()
 	if err != nil {
@@ -49,6 +51,8 @@ func NewWallet() (*Wallet, error) {
 	return &wallet, nil
 }
 
+// HashPubKey hashes a serialized public key for use in an address and output
+// lock.
 func HashPubKey(pubKey []byte) []byte {
 	// Given that RIPEMD160 is deprecated and I have no legacy addresses that need public key shortening I will just use sha256
 	sum := sha256.Sum256(pubKey)
@@ -62,13 +66,16 @@ func checksum(payload []byte) []byte {
 	return secondSHA[:addressChecksumLen]
 }
 
+// GetPubKeyHash returns the hash of the wallet's public key.
 func (w Wallet) GetPubKeyHash() []byte {
 	return HashPubKey(w.PublicKey)
 }
 
-// return string as it's meant to be human readable
+// GetAddress returns the wallet's Base58Check-encoded address.
 func (w Wallet) GetAddress() string {
-	pubKeyHash := HashPubKey(w.PublicKey)
+	// Addresses contain a versioned public-key hash and a short checksum so they
+	// are readable while still allowing malformed addresses to be rejected.
+	pubKeyHash := w.GetPubKeyHash()
 
 	versionedPayload := append([]byte{version}, pubKeyHash...)
 	checksum := checksum(versionedPayload)

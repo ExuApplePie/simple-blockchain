@@ -4,15 +4,14 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"slices"
 )
 
 const (
 	walletFile = "wallets.dat"
 )
 
+// Wallets stores wallets indexed by their addresses.
 type Wallets struct {
 	Wallets map[string]*Wallet
 }
@@ -21,6 +20,8 @@ type storedWallets struct {
 	Wallets map[string]storedWallet `json:"wallets"`
 }
 
+// NewWallets loads the wallet collection from disk, or creates an empty
+// collection when the wallet file does not exist yet.
 func NewWallets() (*Wallets, error) {
 	wallets := Wallets{}
 	wallets.Wallets = make(map[string]*Wallet)
@@ -34,25 +35,29 @@ func NewWallets() (*Wallets, error) {
 	return &wallets, nil
 }
 
+// CreateWallet generates and stores a wallet, returning its address.
 func (wl *Wallets) CreateWallet() (string, error) {
 	wallet, err := NewWallet()
 	if err != nil {
 		return "", err
 	}
-	address := fmt.Sprintf("%s", wallet.GetAddress())
+	address := wallet.GetAddress()
 
 	wl.Wallets[address] = wallet
 
 	return address, nil
 }
 
-func (wl *Wallets) GetWallet(from string) (*Wallet, error) {
-	if slices.Contains(wl.GetAddresses(), from) {
-		return wl.Wallets[from], nil
+// GetWallet returns the wallet stored under address.
+func (wl *Wallets) GetWallet(address string) (*Wallet, error) {
+	wallet, ok := wl.Wallets[address]
+	if !ok {
+		return nil, errors.New("wallet not found")
 	}
-	return nil, errors.New("Wallet not found")
+	return wallet, nil
 }
 
+// GetAddresses returns all addresses stored in the collection.
 func (wl *Wallets) GetAddresses() []string {
 	var addresses []string
 
@@ -63,7 +68,10 @@ func (wl *Wallets) GetAddresses() []string {
 	return addresses
 }
 
+// SaveToFile serializes all wallets to the wallet file.
 func (wl *Wallets) SaveToFile() error {
+	// Store key material in serializable forms rather than marshaling
+	// elliptic.Curve directly, which JSON cannot encode.
 	stored := storedWallets{
 		Wallets: make(map[string]storedWallet, len(wl.Wallets)),
 	}
@@ -87,6 +95,7 @@ func (wl *Wallets) SaveToFile() error {
 	return os.WriteFile(walletFile, data, 0o0600)
 }
 
+// LoadFromFile replaces the in-memory wallets with wallets read from disk.
 func (wl *Wallets) LoadFromFile() error {
 	fileContent, err := os.ReadFile(walletFile)
 	if err != nil {
@@ -97,6 +106,8 @@ func (wl *Wallets) LoadFromFile() error {
 		return err
 	}
 
+	// Reconstruct each private key from its standard X.509 representation and
+	// pair it with the saved serialized public key.
 	for address, saved := range stored.Wallets {
 		privateKey, err := x509.ParseECPrivateKey(saved.PrivateKey)
 		if err != nil {

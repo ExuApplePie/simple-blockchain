@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// Block groups transactions, links to the previous block, and stores its
+// proof-of-work result.
 type Block struct {
 	Timestamp     int64
 	Transactions  []*Transaction
@@ -15,25 +17,34 @@ type Block struct {
 	Nonce         int
 }
 
-func NewBlock(transactions []*Transaction, prevBlockHash []byte) *Block {
+// NewBlock creates and mines a block that follows prevBlockHash.
+func NewBlock(transactions []*Transaction, prevBlockHash []byte) (*Block, error) {
+	// Start with the block contents, then let proof-of-work fill in the nonce
+	// and hash that make this block computationally valid.
 	block := &Block{time.Now().Unix(), transactions, prevBlockHash, []byte{}, 0}
 	pow := NewProofOfWork(block)
-	nonce, hash := pow.Run()
+	nonce, hash, err := pow.Run()
+	if err != nil {
+		return nil, err
+	}
 
 	block.Hash = hash[:]
 	block.Nonce = nonce
 
-	return block
+	return block, nil
 }
 
-func NewGenesisBlock(coinbase *Transaction) *Block {
+// NewGenesisBlock creates the first block in a blockchain.
+func NewGenesisBlock(coinbase *Transaction) (*Block, error) {
 	return NewBlock([]*Transaction{coinbase}, []byte{})
 }
 
+// Serialize encodes the block as JSON for database storage.
 func (b *Block) Serialize() ([]byte, error) {
 	return json.Marshal(b)
 }
 
+// DeserializeBlock decodes a JSON-encoded block.
 func DeserializeBlock(d []byte) (*Block, error) {
 	var block Block
 
@@ -43,9 +54,11 @@ func DeserializeBlock(d []byte) (*Block, error) {
 	return &block, nil
 }
 
+// HashTransactions returns the hash of all transaction IDs in the block.
 func (b *Block) HashTransactions() []byte {
 	var txHashes [][]byte
 	var txHash [32]byte
+	// The block commits to every transaction ID through one combined hash.
 	for _, tx := range b.Transactions {
 		txHashes = append(txHashes, tx.ID)
 	}

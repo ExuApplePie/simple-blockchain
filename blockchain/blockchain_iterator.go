@@ -6,14 +6,18 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// BlockchainIterator walks blocks backward from the current chain tip.
 type BlockchainIterator struct {
 	currentHash []byte
 	db          *bolt.DB
 }
 
+// Next returns the current block and advances to its predecessor.
 func (i *BlockchainIterator) Next() (*Block, error) {
 	var block *Block
 
+	// Read and deserialize one block per BoltDB transaction, then move the
+	// iterator to that block's predecessor after the read succeeds.
 	err := i.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		if b == nil {
@@ -37,6 +41,7 @@ func (i *BlockchainIterator) Next() (*Block, error) {
 	return block, nil
 }
 
+// Iterator returns an iterator positioned at the blockchain tip.
 func (bc *Blockchain) Iterator() *BlockchainIterator {
 	return &BlockchainIterator{bc.tip, bc.db}
 }

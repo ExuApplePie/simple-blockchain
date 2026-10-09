@@ -34,3 +34,4 @@ go.work.sum
 blockchain.db
 wallets.dat
 *.md
+graphify-out/

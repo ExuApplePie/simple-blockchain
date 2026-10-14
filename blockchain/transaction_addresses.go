@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/btcsuite/btcutil/base58"
 )
@@ -14,18 +15,20 @@ func NewCoinbaseTX(to, data string) (*Transaction, error) {
 	// A coinbase input has no previous transaction; its data field carries the
 	// miner/reward message instead.
 	if len(data) == 0 {
-		data = fmt.Sprintf("Reward to '%s'", to)
+		// Include a nonce-like timestamp so repeated mining rewards do not reuse
+		// the same transaction ID and overwrite one another in the UTXO set.
+		data = fmt.Sprintf("Reward to '%s' at %d", to, time.Now().UnixNano())
 	}
 
 	txin := TXInput{[]byte{}, -1, nil, []byte(data)}
 	txout, err := NewTXOutput(subsidy, to)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create coinbase output: %w", err)
 	}
 	tx := Transaction{nil, []TXInput{txin}, []TXOutput{*txout}}
 	hash, err := tx.Hash()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("hash coinbase transaction: %w", err)
 	}
 	// Assign the ID only after hashing the transaction without an ID.
 	tx.ID = hash
@@ -55,7 +58,7 @@ func NewTXOutput(value int, address string) (*TXOutput, error) {
 	txo := &TXOutput{Value: value, PubKeyHash: nil}
 	pubKeyHash, err := PubKeyHashFromAddress(address)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode output address %q: %w", address, err)
 	}
 	txo.PubKeyHash = pubKeyHash
 	return txo, nil

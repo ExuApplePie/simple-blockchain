@@ -22,7 +22,7 @@ func (tx *Transaction) Hash() ([]byte, error) {
 
 	data, err := txCopy.Serialize()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("serialize transaction for hashing: %w", err)
 	}
 	hash = sha256.Sum256(data)
 
@@ -68,7 +68,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		// inserted into the copy before hashing.
 		prevOutput, err := previousOutput(vin, prevTXs)
 		if err != nil {
-			return err
+			return fmt.Errorf("resolve previous output for input %d: %w", inID, err)
 		}
 		// Include the previous locking hash while constructing the message, but
 		// never include the private key or the final public key in that message.
@@ -76,7 +76,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 		txCopy.Vin[inID].PubKey = prevOutput.PubKeyHash
 		hash, err := txCopy.Hash()
 		if err != nil {
-			return err
+			return fmt.Errorf("hash transaction input %d for signing: %w", inID, err)
 		}
 
 		txCopy.ID = hash
@@ -84,7 +84,7 @@ func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transac
 
 		signature, err := ecdsa.SignASN1(rand.Reader, &privKey, txCopy.ID)
 		if err != nil {
-			return err
+			return fmt.Errorf("sign transaction input %d: %w", inID, err)
 		}
 
 		// Store the signature only on the original transaction after signing the

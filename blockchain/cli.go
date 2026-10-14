@@ -36,7 +36,7 @@ func (cli *CLI) printUsage() {
 func (cli *CLI) Run() error {
 	if err := cli.validateArgs(); err != nil {
 		cli.printUsage()
-		return err
+		return fmt.Errorf("validate CLI arguments: %w", err)
 	}
 
 	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ContinueOnError)
@@ -55,7 +55,7 @@ func (cli *CLI) Run() error {
 	switch os.Args[1] {
 	case "printchain":
 		if err := printChainCmd.Parse(os.Args[2:]); err != nil {
-			return err
+			return fmt.Errorf("parse printchain arguments: %w", err)
 		}
 		if printChainCmd.NArg() != 0 {
 			return errors.New("printchain takes no arguments")
@@ -63,7 +63,7 @@ func (cli *CLI) Run() error {
 		return cli.printChain()
 	case "createblockchain":
 		if err := createBlockchainCmd.Parse(os.Args[2:]); err != nil {
-			return err
+			return fmt.Errorf("parse createblockchain arguments: %w", err)
 		}
 		if createBlockchainCmd.NArg() != 0 {
 			return errors.New("createblockchain takes no positional arguments")
@@ -75,7 +75,7 @@ func (cli *CLI) Run() error {
 		return cli.createBlockchain(*createBlockchainAddress)
 	case "getbalance":
 		if err := getBalanceCmd.Parse(os.Args[2:]); err != nil {
-			return err
+			return fmt.Errorf("parse getbalance arguments: %w", err)
 		}
 		if getBalanceCmd.NArg() != 0 {
 			return errors.New("getbalance takes no positional arguments")
@@ -87,7 +87,7 @@ func (cli *CLI) Run() error {
 		return cli.getBalance(*getBalanceAddress)
 	case "send":
 		if err := sendCmd.Parse(os.Args[2:]); err != nil {
-			return err
+			return fmt.Errorf("parse send arguments: %w", err)
 		}
 		if sendCmd.NArg() != 0 {
 			return errors.New("send takes no positional arguments")

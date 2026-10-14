@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	bolt "go.etcd.io/bbolt"
@@ -28,7 +29,7 @@ func (bc *Blockchain) Close() error {
 
 // MineBlock validates transactions, mines a block, and persists it as the new
 // chain tip.
-func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
+func (bc *Blockchain) MineBlock(transactions []*Transaction) (*Block, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -37,16 +38,16 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
 	for _, tx := range transactions {
 		validTransaction, err := bc.VerifyTransaction(tx)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("verify transaction: %w", err)
 		}
 		if validTransaction != true {
-			return errors.New("Invalid Transaction")
+			return nil, errors.New("Invalid Transaction")
 		}
 	}
 
 	newBlock, err := NewBlock(transactions, bc.tip)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("mine new block: %w", err)
 	}
 
 	// Store the block and update the tip in one BoltDB write transaction.
@@ -57,20 +58,20 @@ func (bc *Blockchain) MineBlock(transactions []*Transaction) error {
 		}
 		serializedData, err := newBlock.Serialize()
 		if err != nil {
-			return err
+			return fmt.Errorf("serialize mined block: %w", err)
 		}
 		if err := b.Put(newBlock.Hash, serializedData); err != nil {
-			return err
+			return fmt.Errorf("store mined block: %w", err)
 		}
 		if err := b.Put([]byte(lastHashKey), newBlock.Hash); err != nil {
-			return err
+			return fmt.Errorf("update blockchain tip: %w", err)
 		}
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("persist mined block: %w", err)
 	}
 	bc.tip = newBlock.Hash
 
-	return nil
+	return newBlock, nil
 }

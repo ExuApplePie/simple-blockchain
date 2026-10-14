@@ -10,6 +10,11 @@ type TXOutput struct {
 	PubKeyHash []byte
 }
 
+// TXOutputs collects transaction outputs for a single transaction ID.
+type TXOutputs struct {
+	Outputs []TXOutput
+}
+
 // TXInput references an output from an earlier transaction and proves ownership
 // of that output with a signature and public key.
 type TXInput struct {
@@ -28,11 +33,17 @@ type Transaction struct {
 
 // Serialize encodes the transaction as JSON for storage and hashing.
 func (tx *Transaction) Serialize() ([]byte, error) {
-	data, err := json.Marshal(tx)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return json.Marshal(tx)
+}
+
+// Serialize encodes transaction outputs as JSON for UTXO storage.
+func (outs *TXOutputs) Serialize() ([]byte, error) {
+	return json.Marshal(outs)
+}
+
+// DeserializeOutputs decodes serialized transaction outputs into output.
+func DeserializeOutputs(data []byte, output *TXOutputs) error {
+	return json.Unmarshal(data, output)
 }
 
 // IsCoinbase reports whether the transaction creates the initial block reward

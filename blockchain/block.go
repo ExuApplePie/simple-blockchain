@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -23,13 +24,13 @@ func NewBlock(transactions []*Transaction, prevBlockHash []byte) (*Block, error)
 	// and hash that make this block computationally valid.
 	block := &Block{time.Now().Unix(), transactions, prevBlockHash, []byte{}, 0}
 	pow := NewProofOfWork(block)
-	nonce, hash, err := pow.Run()
+	result, err := pow.Run()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("run proof of work: %w", err)
 	}
 
-	block.Hash = hash[:]
-	block.Nonce = nonce
+	block.Hash = result.Hash
+	block.Nonce = result.Nonce
 
 	return block, nil
 }
@@ -49,7 +50,7 @@ func DeserializeBlock(d []byte) (*Block, error) {
 	var block Block
 
 	if err := json.Unmarshal(d, &block); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("deserialize block JSON: %w", err)
 	}
 	return &block, nil
 }

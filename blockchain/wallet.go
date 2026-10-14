@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"fmt"
 
 	"github.com/btcsuite/btcutil/base58"
 )
@@ -26,29 +27,27 @@ type storedWallet struct {
 	PublicKey  []byte `json:"publicKey"`
 }
 
-func newKeyPair() (ecdsa.PrivateKey, []byte, error) {
+func newKeyPair() (*Wallet, error) {
 	curve := elliptic.P256()
 	private, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
-		return ecdsa.PrivateKey{}, nil, err
+		return nil, fmt.Errorf("generate ECDSA private key: %w", err)
 	}
 	pubKey, err := private.PublicKey.Bytes()
 	if err != nil {
-		return ecdsa.PrivateKey{}, nil, err
+		return nil, fmt.Errorf("serialize ECDSA public key: %w", err)
 	}
 
-	return *private, pubKey, nil
+	return &Wallet{PrivateKey: *private, PublicKey: pubKey}, nil
 }
 
 // NewWallet generates a new P-256 ECDSA wallet.
 func NewWallet() (*Wallet, error) {
-	private, public, err := newKeyPair()
+	wallet, err := newKeyPair()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create wallet key pair: %w", err)
 	}
-	wallet := Wallet{PrivateKey: private, PublicKey: public}
-
-	return &wallet, nil
+	return wallet, nil
 }
 
 // HashPubKey hashes a serialized public key for use in an address and output

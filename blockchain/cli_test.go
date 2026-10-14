@@ -1,7 +1,9 @@
 package blockchain
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -14,20 +16,22 @@ func TestCLICoreWalletAndTransactionFlow(t *testing.T) {
 	cli := NewCLI()
 	run := func(args ...string) error {
 		originalArgs := os.Args
-		originalStdout := os.Stdout
-		sink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-		if err != nil {
-			return err
-		}
+		fmt.Printf("\n$ simple-blockchain %s\n", strings.Join(args, " "))
 		defer func() {
 			os.Args = originalArgs
-			os.Stdout = originalStdout
-			_ = sink.Close()
 		}()
 
 		os.Args = append([]string{"simple-blockchain"}, args...)
-		os.Stdout = sink
 		return cli.Run()
+	}
+	checkBalance := func(address string, want int) {
+		t.Helper()
+		if err := run("getbalance", "-address", address); err != nil {
+			t.Fatalf("getbalance for %s failed: %v", address, err)
+		}
+		if got := balanceFor(t, address); got != want {
+			t.Fatalf("balance for %s = %d, want %d", address, got, want)
+		}
 	}
 
 	// Create the first wallet and use it as the genesis recipient.
@@ -49,6 +53,7 @@ func TestCLICoreWalletAndTransactionFlow(t *testing.T) {
 	if got := balanceFor(t, owner); got != subsidy {
 		t.Fatalf("genesis balance = %d, want %d", got, subsidy)
 	}
+	checkBalance(owner, subsidy)
 
 	// Create a recipient and send part of the genesis reward.
 	if err := run("createwallet"); err != nil {
@@ -66,23 +71,38 @@ func TestCLICoreWalletAndTransactionFlow(t *testing.T) {
 	if err := run("send", "-from", owner, "-to", recipient, "-amount", "3"); err != nil {
 		t.Fatalf("send failed: %v", err)
 	}
-	if got := balanceFor(t, owner); got != subsidy-3 {
-		t.Fatalf("owner balance after send = %d, want %d", got, subsidy-3)
+	if got := balanceFor(t, owner); got != subsidy-3+subsidy {
+		t.Fatalf("owner balance after send = %d, want %d", got, subsidy-3+subsidy)
 	}
 	if got := balanceFor(t, recipient); got != 3 {
 		t.Fatalf("recipient balance after send = %d, want 3", got)
 	}
+	checkBalance(owner, subsidy-3+subsidy)
+	checkBalance(recipient, 3)
 
-	// The owner has 7 coins after the transfer, so spending 8 must fail.
-	err := run("send", "-from", owner, "-to", recipient, "-amount", "8")
+	// The owner receives another mining reward when sending again.
+	if err := run("send", "-from", owner, "-to", recipient, "-amount", "8"); err != nil {
+		t.Fatalf("second send failed: %v", err)
+	}
+	if got := balanceFor(t, owner); got != subsidy-3+subsidy-8+subsidy {
+		t.Fatalf("owner balance after second send = %d, want %d", got, subsidy-3+subsidy-8+subsidy)
+	}
+	if got := balanceFor(t, recipient); got != 3+8 {
+		t.Fatalf("recipient balance after second send = %d, want %d", got, 3+8)
+	}
+	checkBalance(owner, subsidy-3+subsidy-8+subsidy)
+	checkBalance(recipient, 3+8)
+
+	// The owner has 19 coins after the two transfers and rewards, so spending 20 must fail.
+	err := run("send", "-from", owner, "-to", recipient, "-amount", "20")
 	if err == nil {
 		t.Fatal("send succeeded with insufficient funds")
 	}
-	if err.Error() != "Not enough funds" {
-		t.Fatalf("insufficient-funds error = %v, want Not enough funds", err)
+	if !strings.Contains(err.Error(), "Not enough funds") {
+		t.Fatalf("insufficient-funds error = %v, want it to contain Not enough funds", err)
 	}
-	if got := balanceFor(t, owner); got != subsidy-3 {
-		t.Fatalf("owner balance changed after rejected send = %d, want %d", got, subsidy-3)
+	if got := balanceFor(t, owner); got != subsidy-3+subsidy-8+subsidy {
+		t.Fatalf("owner balance changed after rejected send = %d, want %d", got, subsidy-3+subsidy-8+subsidy)
 	}
 }
 
@@ -120,7 +140,8 @@ func balanceFor(t *testing.T, address string) int {
 	if err != nil {
 		t.Fatalf("decode address: %v", err)
 	}
-	utxos, err := bc.FindUTXO(pubKeyHash)
+	utxoSet := UTXOSet{Blockchain: bc}
+	utxos, err := utxoSet.FindUTXO(pubKeyHash)
 	if err != nil {
 		t.Fatalf("find UTXOs: %v", err)
 	}

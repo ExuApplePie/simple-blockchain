@@ -19,6 +19,12 @@ type ProofOfWork struct {
 	target *big.Int
 }
 
+// MiningResult contains the nonce and hash that satisfy the proof-of-work target.
+type MiningResult struct {
+	Nonce int
+	Hash  []byte
+}
+
 // NewProofOfWork creates a proof-of-work calculator for b.
 func NewProofOfWork(b *Block) *ProofOfWork {
 	target := big.NewInt(1)
@@ -41,7 +47,7 @@ func (pow *ProofOfWork) prepareMiningData(nonce int) []byte {
 }
 
 // Run searches for a nonce whose hash satisfies the configured target.
-func (pow *ProofOfWork) Run() (int, []byte, error) {
+func (pow *ProofOfWork) Run() (MiningResult, error) {
 	var hashInt big.Int
 	var hash [32]byte
 	nonce := 0
@@ -57,14 +63,14 @@ func (pow *ProofOfWork) Run() (int, []byte, error) {
 		hashInt.SetBytes(hash[:])
 
 		if hashInt.Cmp(pow.target) == -1 {
-			return nonce, hash[:], nil
+			return MiningResult{Nonce: nonce, Hash: hash[:]}, nil
 		} else {
 			nonce++
 		}
 	}
 	fmt.Print("\n\n")
 
-	return 0, nil, errors.New("proof of work exhausted nonce range")
+	return MiningResult{}, errors.New("proof of work exhausted nonce range")
 }
 
 // Validate checks that the stored nonce and hash satisfy the proof-of-work

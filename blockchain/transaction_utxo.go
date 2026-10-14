@@ -3,6 +3,7 @@ package blockchain
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 )
 
 // FindUnspentTransactions returns transactions containing outputs that are
@@ -21,7 +22,7 @@ func (bc *Blockchain) FindUnspentTransactions(pubKeyHash []byte) ([]Transaction,
 	for {
 		block, err := bci.Next()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan blockchain for unspent transactions: %w", err)
 		}
 
 		for _, tx := range block.Transactions {
@@ -31,12 +32,8 @@ func (bc *Blockchain) FindUnspentTransactions(pubKeyHash []byte) ([]Transaction,
 			// Collect outputs belonging to this key unless a later transaction
 			// already recorded the same output as spent.
 			for outIdx, out := range tx.Vout {
-				if spentTXOs[txID] != nil {
-					for _, spentOut := range spentTXOs[txID] {
-						if spentOut == outIdx {
-							continue Outputs
-						}
-					}
+				if isOutputSpent(spentTXOs, txID, outIdx) {
+					continue Outputs
 				}
 
 				if out.IsLockedWithKey(pubKeyHash) {
@@ -64,62 +61,62 @@ func (bc *Blockchain) FindUnspentTransactions(pubKeyHash []byte) ([]Transaction,
 }
 
 // FindUTXO returns all unspent outputs locked to pubKeyHash.
-func (bc *Blockchain) FindUTXO(pubKeyHash []byte) ([]TXOutput, error) {
+func (bc *Blockchain) FindUTXO() (map[string]TXOutputs, error) {
 	// FindUnspentTransactions performs chain traversal; this method projects
 	// those matching transactions down to just their spendable outputs.
-	var utxos []TXOutput
-	unspentTransactions, err := bc.FindUnspentTransactions(pubKeyHash)
+	UTXO := make(map[string]TXOutputs)
+	spentTXOs := make(map[string][]int)
+	bci := bc.Iterator()
 
-	if err != nil {
-		return nil, err
-	}
-
-	for _, tx := range unspentTransactions {
-		for _, out := range tx.Vout {
-			if out.IsLockedWithKey(pubKeyHash) {
-				utxos = append(utxos, out)
-			}
+	for {
+		block, err := bci.Next()
+		if err != nil {
+			return nil, fmt.Errorf("get next block: %w", err)
 		}
-	}
-	return utxos, nil
-}
+		for _, tx := range block.Transactions {
+			txID := hex.EncodeToString(tx.ID)
 
-// FindSpendableOutputs selects enough unspent outputs to cover amount.
-func (bc *Blockchain) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int, error) {
-	if amount <= 0 {
-		return -1, nil, errors.New("amount must be greater than 0")
-	}
-	unspentOutputs := make(map[string][]int)
-	unspentTXs, err := bc.FindUnspentTransactions(pubKeyHash)
-	if err != nil {
-		return -1, nil, err
-	}
-	accumulated := 0
+		Outputs:
+			for outIdx, out := range tx.Vout {
+				// was output spent?
+				if isOutputSpent(spentTXOs, txID, outIdx) {
+					continue Outputs
+				}
 
-	// Select outputs until the requested amount is covered. The map preserves
-	// both the transaction ID and output indexes needed to build inputs.
-Work:
-	for _, tx := range unspentTXs {
-		txID := hex.EncodeToString(tx.ID)
+				outs := UTXO[txID]
+				outs.Outputs = append(outs.Outputs, out)
+				UTXO[txID] = outs
+			}
 
-		for outIdx, out := range tx.Vout {
-			if out.IsLockedWithKey(pubKeyHash) && accumulated < amount {
-				accumulated += out.Value
-				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
-
-				if accumulated >= amount {
-					break Work
+			if !tx.IsCoinbase() {
+				for _, in := range tx.Vin {
+					inTxID := hex.EncodeToString(in.Txid)
+					spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
 				}
 			}
 		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
 	}
-	return accumulated, unspentOutputs, nil
+	return UTXO, nil
+}
+
+// isOutputSpent reports whether a later transaction consumed this output.
+func isOutputSpent(spentOutputs map[string][]int, txID string, outputIndex int) bool {
+	for _, spentIndex := range spentOutputs[txID] {
+		if spentIndex == outputIndex {
+			return true
+		}
+	}
+	return false
 }
 
 // NewUTXOTransaction creates, signs, and returns a transaction spending the
 // sender's unspent outputs. Any excess value is returned to the sender as
 // change.
-func NewUTXOTransaction(from, to string, amount int, bc *Blockchain) (*Transaction, error) {
+func NewUTXOTransaction(from, to string, amount int, UTXOSet *UTXOSet) (*Transaction, error) {
 	if amount <= 0 {
 		return nil, errors.New("amount must be greater than zero")
 	}
@@ -127,43 +124,44 @@ func NewUTXOTransaction(from, to string, amount int, bc *Blockchain) (*Transacti
 	// Load the sender's private/public key pair so the new inputs can be signed.
 	wallets, err := NewWallets()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load wallets for transaction: %w", err)
 	}
 	wallet, err := wallets.GetWallet(from)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load sender wallet %q: %w", from, err)
 	}
 	// Use the sender's public-key hash to discover outputs the sender can spend.
 	pubKeyHash := wallet.GetPubKeyHash()
-	acc, validOutputs, err := bc.FindSpendableOutputs(pubKeyHash, amount)
+	selection, err := UTXOSet.FindSpendableOutputs(pubKeyHash, amount)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("select spendable outputs for %q: %w", from, err)
 	}
 
-	if acc < amount {
+	if selection.Amount < amount {
 		return nil, errors.New("Not enough funds")
 	}
 
 	// Build recipient and change outputs separately from the inputs being spent.
-	inputs, err := newTransactionInputs(validOutputs, wallet.PublicKey)
+	inputs, err := newTransactionInputs(selection.Outputs, wallet.PublicKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build transaction inputs: %w", err)
 	}
 
-	outputs, err := newTransactionOutputs(amount, acc, from, to)
+	outputs, err := newTransactionOutputs(amount, selection.Amount, from, to)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build transaction outputs: %w", err)
 	}
 
 	// Hash the unsigned transaction first, then sign each input against the
-	// previous output it spends.
+	// previous output it spends. The transaction ID is recalculated by Hash
+	// before signing, while signatures are added afterward.
 	tx := Transaction{nil, inputs, outputs}
 	tx.ID, err = tx.Hash()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("hash new transaction: %w", err)
 	}
-	if err := bc.SignTransaction(&tx, wallet.PrivateKey); err != nil {
-		return nil, err
+	if err := UTXOSet.Blockchain.SignTransaction(&tx, wallet.PrivateKey); err != nil {
+		return nil, fmt.Errorf("sign new transaction: %w", err)
 	}
 
 	return &tx, nil
@@ -175,7 +173,7 @@ func newTransactionInputs(validOutputs map[string][]int, publicKey []byte) ([]TX
 	for txid, outs := range validOutputs {
 		txID, err := hex.DecodeString(txid)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode transaction ID %q: %w", txid, err)
 		}
 
 		for _, out := range outs {
@@ -189,14 +187,14 @@ func newTransactionInputs(validOutputs map[string][]int, publicKey []byte) ([]TX
 func newTransactionOutputs(amount, available int, from, to string) ([]TXOutput, error) {
 	newtxo, err := NewTXOutput(amount, to)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create recipient output: %w", err)
 	}
 	outputs := []TXOutput{*newtxo}
 
 	if available > amount {
 		newtxo, err = NewTXOutput(available-amount, from)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create change output: %w", err)
 		}
 		outputs = append(outputs, *newtxo)
 	}

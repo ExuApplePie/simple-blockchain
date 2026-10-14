@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 )
 
@@ -28,7 +29,7 @@ func NewWallets() (*Wallets, error) {
 
 	if err := wallets.LoadFromFile(); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return nil, fmt.Errorf("load wallets: %w", err)
 		}
 		// Just use empty map if file doesn't exist for first run
 	}
@@ -39,7 +40,7 @@ func NewWallets() (*Wallets, error) {
 func (wl *Wallets) CreateWallet() (string, error) {
 	wallet, err := NewWallet()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("generate wallet: %w", err)
 	}
 	address := wallet.GetAddress()
 
@@ -79,7 +80,7 @@ func (wl *Wallets) SaveToFile() error {
 	for address, wallet := range wl.Wallets {
 		privateKey, err := x509.MarshalECPrivateKey(&wallet.PrivateKey)
 		if err != nil {
-			return err
+			return fmt.Errorf("serialize private key for wallet %q: %w", address, err)
 		}
 
 		stored.Wallets[address] = storedWallet{
@@ -90,20 +91,23 @@ func (wl *Wallets) SaveToFile() error {
 
 	data, err := json.MarshalIndent(stored, "", "\t")
 	if err != nil {
-		return err
+		return fmt.Errorf("serialize wallets: %w", err)
 	}
-	return os.WriteFile(walletFile, data, 0o0600)
+	if err := os.WriteFile(walletFile, data, 0o0600); err != nil {
+		return fmt.Errorf("write wallet file %q: %w", walletFile, err)
+	}
+	return nil
 }
 
 // LoadFromFile replaces the in-memory wallets with wallets read from disk.
 func (wl *Wallets) LoadFromFile() error {
 	fileContent, err := os.ReadFile(walletFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("read wallet file %q: %w", walletFile, err)
 	}
 	var stored storedWallets
 	if err := json.Unmarshal(fileContent, &stored); err != nil {
-		return err
+		return fmt.Errorf("parse wallet file %q: %w", walletFile, err)
 	}
 
 	// Reconstruct each private key from its standard X.509 representation and
@@ -111,7 +115,7 @@ func (wl *Wallets) LoadFromFile() error {
 	for address, saved := range stored.Wallets {
 		privateKey, err := x509.ParseECPrivateKey(saved.PrivateKey)
 		if err != nil {
-			return err
+			return fmt.Errorf("parse private key for wallet %q: %w", address, err)
 		}
 
 		wl.Wallets[address] = &Wallet{

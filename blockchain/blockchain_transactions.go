@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
+	"fmt"
 )
 
 // FindTransaction searches the chain for a transaction with the supplied ID.
@@ -15,7 +16,7 @@ func (bc *Blockchain) FindTransaction(id []byte) (Transaction, error) {
 	for {
 		block, err := bci.Next()
 		if err != nil {
-			return Transaction{}, err
+			return Transaction{}, fmt.Errorf("scan blockchain for transaction %x: %w", id, err)
 		}
 
 		for _, tx := range block.Transactions {
@@ -39,7 +40,7 @@ func (bc *Blockchain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 	// IDs, so resolve every input through the chain before signing.
 	prevTXs, err := bc.previousTransactions(tx)
 	if err != nil {
-		return err
+		return fmt.Errorf("load previous transactions for signing: %w", err)
 	}
 
 	return tx.Sign(privKey, prevTXs)
@@ -48,11 +49,15 @@ func (bc *Blockchain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 // VerifyTransaction verifies tx against the previous transactions it
 // references from the chain.
 func (bc *Blockchain) VerifyTransaction(tx *Transaction) (bool, error) {
+	if tx.IsCoinbase() {
+		return true, nil
+	}
+
 	// Verification reconstructs the same previous-transaction context used by
 	// signing, then delegates cryptographic checks to Transaction.Verify.
 	prevTXs, err := bc.previousTransactions(tx)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("load previous transactions for verification: %w", err)
 	}
 
 	return tx.Verify(prevTXs), nil
@@ -66,7 +71,7 @@ func (bc *Blockchain) previousTransactions(tx *Transaction) (map[string]Transact
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.FindTransaction(vin.Txid)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("find previous transaction %x: %w", vin.Txid, err)
 		}
 		prevTXs[hex.EncodeToString(prevTX.ID)] = prevTX
 	}

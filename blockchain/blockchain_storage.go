@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 // CreateBlockchain creates a new blockchain database with a genesis block
@@ -15,36 +16,36 @@ func CreateBlockchain(address string) (*Blockchain, error) {
 	// process from creating or modifying the same blockchain concurrently.
 	db, err := bolt.Open(dbFile, 0o600, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open blockchain database %q: %w", dbFile, err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
 		// Build and mine the genesis transaction inside the same initialization
 		// operation so the bucket is created only for a complete chain.
 		cbtx, err := NewCoinbaseTX(address, genesisCoinbaseData)
 		if err != nil {
-			return err
+			return fmt.Errorf("create genesis coinbase transaction: %w", err)
 		}
 		genesis, err := NewGenesisBlock(cbtx)
 		if err != nil {
-			return err
+			return fmt.Errorf("create genesis block: %w", err)
 		}
 
 		b, err := tx.CreateBucket([]byte(blocksBucket))
 		if err != nil {
-			if errors.Is(err, bolt.ErrBucketExists) {
+			if errors.Is(err, boltErrors.ErrBucketExists) {
 				return fmt.Errorf("blockchain already exists: %w", err)
 			}
-			return err
+			return fmt.Errorf("create blocks bucket: %w", err)
 		}
 		data, err := genesis.Serialize()
 		if err != nil {
-			return err
+			return fmt.Errorf("serialize genesis block: %w", err)
 		}
 		if err := b.Put(genesis.Hash, data); err != nil {
-			return err
+			return fmt.Errorf("store genesis block: %w", err)
 		}
 		if err := b.Put([]byte(lastHashKey), genesis.Hash); err != nil {
-			return err
+			return fmt.Errorf("store genesis blockchain tip: %w", err)
 		}
 		tip = genesis.Hash
 
@@ -54,7 +55,7 @@ func CreateBlockchain(address string) (*Blockchain, error) {
 		if closeErr := db.Close(); closeErr != nil {
 			return nil, fmt.Errorf("initialize blockchain: %w (also failed to close database: %v)", err, closeErr)
 		}
-		return nil, err
+		return nil, fmt.Errorf("initialize blockchain: %w", err)
 	}
 	return &Blockchain{tip: tip, db: db}, nil
 }
@@ -65,7 +66,7 @@ func OpenBlockchain() (*Blockchain, error) {
 	var tip []byte
 	db, err := bolt.Open(dbFile, 0o600, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open blockchain database %q: %w", dbFile, err)
 	}
 	err = db.View(func(tx *bolt.Tx) error {
 		// Read the persisted tip while the BoltDB read transaction is open, then
@@ -90,7 +91,7 @@ func OpenBlockchain() (*Blockchain, error) {
 		if closeErr := db.Close(); closeErr != nil {
 			return nil, fmt.Errorf("read blockchain tip: %w (also failed to close database: %v)", err, closeErr)
 		}
-		return nil, err
+		return nil, fmt.Errorf("read blockchain tip: %w", err)
 	}
 
 	return &Blockchain{tip: tip, db: db}, nil

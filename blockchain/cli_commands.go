@@ -11,7 +11,7 @@ func (cli *CLI) printChain() (err error) {
 	// printing or deserializing a block fails.
 	bc, err := OpenBlockchain()
 	if err != nil {
-		return err
+		return fmt.Errorf("open blockchain for printing: %w", err)
 	}
 	defer func() {
 		if closeErr := bc.Close(); closeErr != nil {
@@ -28,7 +28,7 @@ func (cli *CLI) printChain() (err error) {
 		// Each call returns the current block and advances toward genesis.
 		block, err := bci.Next()
 		if err != nil {
-			return err
+			return fmt.Errorf("read next block while printing chain: %w", err)
 		}
 
 		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
@@ -50,7 +50,7 @@ func (cli *CLI) printChain() (err error) {
 func (cli *CLI) createBlockchain(address string) (err error) {
 	bc, err := CreateBlockchain(address)
 	if err != nil {
-		return err
+		return fmt.Errorf("create blockchain for CLI: %w", err)
 	}
 	defer func() {
 		if closeErr := bc.Close(); closeErr != nil {
@@ -61,6 +61,10 @@ func (cli *CLI) createBlockchain(address string) (err error) {
 			}
 		}
 	}()
+	UTXOSet := UTXOSet{bc}
+	if err := UTXOSet.Reindex(); err != nil {
+		return fmt.Errorf("reindex UTXO set: %w", err)
+	}
 	fmt.Println("Done!")
 
 	return nil
@@ -70,7 +74,7 @@ func (cli *CLI) createBlockchain(address string) (err error) {
 func (cli *CLI) getBalance(address string) (err error) {
 	bc, err := OpenBlockchain()
 	if err != nil {
-		return err
+		return fmt.Errorf("open blockchain for balance: %w", err)
 	}
 	defer func() {
 		if closeErr := bc.Close(); closeErr != nil {
@@ -84,14 +88,15 @@ func (cli *CLI) getBalance(address string) (err error) {
 
 	// Addresses are converted to key hashes at the CLI boundary; storage only
 	// compares the resulting hashes against output locks.
+	UTXOSet := UTXOSet{bc}
 	balance := 0
 	pubKeyHash, err := PubKeyHashFromAddress(address)
 	if err != nil {
-		return err
+		return fmt.Errorf("decode balance address: %w", err)
 	}
-	utxos, err := bc.FindUTXO(pubKeyHash)
+	utxos, err := UTXOSet.FindUTXO(pubKeyHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("find balance UTXOs: %w", err)
 	}
 
 	for _, out := range utxos {
@@ -106,8 +111,9 @@ func (cli *CLI) getBalance(address string) (err error) {
 func (cli *CLI) send(from, to string, amount int) (err error) {
 	bc, err := OpenBlockchain()
 	if err != nil {
-		return err
+		return fmt.Errorf("open blockchain for send: %w", err)
 	}
+	UTXOSet := UTXOSet{bc}
 	defer func() {
 		if closeErr := bc.Close(); closeErr != nil {
 			if err == nil {
@@ -119,12 +125,24 @@ func (cli *CLI) send(from, to string, amount int) (err error) {
 	}()
 	// Constructing the transaction selects inputs, creates change, and signs it;
 	// MineBlock then verifies that signed transaction before appending the block.
-	tx, err := NewUTXOTransaction(from, to, amount, bc)
+	tx, err := NewUTXOTransaction(from, to, amount, &UTXOSet)
 	if err != nil {
-		return err
+		return fmt.Errorf("create transaction: %w", err)
 	}
-	if err := bc.MineBlock([]*Transaction{tx}); err != nil {
-		return err
+	cbTx, err := NewCoinbaseTX(from, "")
+	if err != nil {
+		return fmt.Errorf("create mining reward: %w", err)
+	}
+	txs := []*Transaction{cbTx, tx}
+
+	newBlock, err := bc.MineBlock(txs)
+	if err != nil {
+		return fmt.Errorf("mine block for send: %w", err)
+	}
+	// TODO: Persist the block and update the UTXO set in the same BoltDB
+	// transaction so a successful block write cannot leave the UTXO set stale.
+	if err := UTXOSet.Update(newBlock); err != nil {
+		return fmt.Errorf("update UTXO set after send: %w", err)
 	}
 	fmt.Println("Success!")
 
@@ -134,15 +152,15 @@ func (cli *CLI) send(from, to string, amount int) (err error) {
 func createWallet() error {
 	wallets, err := NewWallets()
 	if err != nil {
-		return err
+		return fmt.Errorf("load wallets for creation: %w", err)
 	}
 
 	address, err := wallets.CreateWallet()
 	if err != nil {
-		return err
+		return fmt.Errorf("create wallet: %w", err)
 	}
 	if err := wallets.SaveToFile(); err != nil {
-		return err
+		return fmt.Errorf("save new wallet: %w", err)
 	}
 
 	fmt.Printf("Your new address : %s\n", address)
@@ -152,7 +170,7 @@ func createWallet() error {
 func listAddresses() error {
 	wallets, err := NewWallets()
 	if err != nil {
-		return err
+		return fmt.Errorf("load wallets for address listing: %w", err)
 	}
 	for _, address := range wallets.GetAddresses() {
 		fmt.Printf("%s\n", address)

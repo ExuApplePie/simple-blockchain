@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"errors"
+	"fmt"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -30,12 +31,12 @@ func (i *BlockchainIterator) Next() (*Block, error) {
 		var err error
 		block, err = DeserializeBlock(encodedBlock)
 		if err != nil {
-			return err
+			return fmt.Errorf("deserialize block at %x: %w", i.currentHash, err)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read block %x: %w", i.currentHash, err)
 	}
 	i.currentHash = block.PrevBlockHash
 	return block, nil

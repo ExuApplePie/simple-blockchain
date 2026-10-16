@@ -1,8 +1,6 @@
 package blockchain
 
 import (
-	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -56,14 +54,31 @@ func DeserializeBlock(d []byte) (*Block, error) {
 }
 
 // HashTransactions returns the hash of all transaction IDs in the block.
-func (b *Block) HashTransactions() []byte {
-	var txHashes [][]byte
-	var txHash [32]byte
-	// The block commits to every transaction ID through one combined hash.
-	for _, tx := range b.Transactions {
-		txHashes = append(txHashes, tx.ID)
+func (b *Block) HashTransactions() ([]byte, error) {
+	if b == nil {
+		return nil, fmt.Errorf("hash block transactions: block is nil")
 	}
-	txHash = sha256.Sum256(bytes.Join(txHashes, []byte{}))
+	if len(b.Transactions) == 0 {
+		return nil, fmt.Errorf("hash block transactions: block contains no transactions")
+	}
 
-	return txHash[:]
+	var transactions [][]byte
+
+	for index, tx := range b.Transactions {
+		if tx == nil {
+			return nil, fmt.Errorf("hash block transactions: transaction at index %d is nil", index)
+		}
+		data, err := tx.Serialize()
+		if err != nil {
+			return nil, fmt.Errorf("serialize transaction at index %d: %w", index, err)
+		}
+		transactions = append(transactions, data)
+	}
+	mTree := NewMerkleTree(transactions)
+
+	if mTree == nil || mTree.RootNode == nil {
+		return nil, fmt.Errorf("hash block transactions: Merkle tree has no root node")
+	}
+
+	return mTree.RootNode.Data, nil
 }

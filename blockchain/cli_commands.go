@@ -35,7 +35,11 @@ func (cli *CLI) printChain() (err error) {
 		fmt.Printf("Transaction: %v\n", block.Transactions)
 		fmt.Printf("Hash: %x\n", block.Hash)
 		pow := NewProofOfWork(block)
-		fmt.Printf("PoW: %s\n", strconv.FormatBool(pow.Validate()))
+		validPoW, err := pow.Validate()
+		if err != nil {
+			return fmt.Errorf("validate proof of work while printing chain: %w", err)
+		}
+		fmt.Printf("PoW: %s\n", strconv.FormatBool(validPoW))
 		fmt.Println()
 
 		if len(block.PrevBlockHash) == 0 {
